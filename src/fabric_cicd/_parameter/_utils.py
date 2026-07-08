@@ -406,7 +406,15 @@ def extract_parameter_filters(workspace_obj: FabricWorkspace, param_dict: dict) 
     """Extracts the item type, name, and path filters from the parameter dictionary, if present."""
     item_type = param_dict.get("item_type")
     item_name = param_dict.get("item_name")
-    file_path = process_input_path(workspace_obj.repository_directory, param_dict.get("file_path"))
+    file_path_value = param_dict.get("file_path")
+
+    # Reuse preprocessed file paths to avoid repeated wildcard processing and validation.
+    if isinstance(file_path_value, list) and all(isinstance(path, Path) for path in file_path_value):
+        file_path = file_path_value
+    else:
+        file_path = process_input_path(workspace_obj.repository_directory, file_path_value)
+        if "file_path" in param_dict and file_path is not None:
+            param_dict["file_path"] = file_path
 
     return item_type, item_name, file_path
 

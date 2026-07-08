@@ -633,6 +633,33 @@ class TestParameterUtilities:
             assert item_name is None
             assert file_path == []
 
+    def test_extract_parameter_filters_reuses_preprocessed_file_path(self, mock_workspace):
+        """Tests extract_parameter_filters does not reprocess already-resolved file paths."""
+        processed_path = Path("processed/path")
+        param_dict = {"file_path": [processed_path]}
+
+        with mock.patch("fabric_cicd._parameter._utils.process_input_path") as mock_process:
+            item_type, item_name, file_path = extract_parameter_filters(mock_workspace, param_dict)
+
+            assert item_type is None
+            assert item_name is None
+            assert file_path == [processed_path]
+            mock_process.assert_not_called()
+
+    def test_extract_parameter_filters_caches_processed_file_path(self, mock_workspace):
+        """Tests extract_parameter_filters caches processed file paths for reuse."""
+        param_dict = {"file_path": "path/to/file.txt"}
+        processed_path = Path("processed/path")
+
+        with mock.patch(
+            "fabric_cicd._parameter._utils.process_input_path", return_value=[processed_path]
+        ) as mock_process:
+            _ = extract_parameter_filters(mock_workspace, param_dict)
+            _ = extract_parameter_filters(mock_workspace, param_dict)
+
+            assert param_dict["file_path"] == [processed_path]
+            mock_process.assert_called_once_with(mock_workspace.repository_directory, "path/to/file.txt")
+
     def test_check_parameter_structure(self):
         """Tests _check_parameter_structure function."""
         # Test with valid list
