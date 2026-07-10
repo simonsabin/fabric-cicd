@@ -157,6 +157,10 @@ class FabricWorkspace:
 
         # Get parameter_file_path from kwargs
         self.parameter_file_path = kwargs.get("parameter_file_path")
+        self.parameter_processing_mode = kwargs.get("parameter_processing_mode", "legacy")
+        if self.parameter_processing_mode not in {"legacy", "optimized"}:
+            msg = "parameter_processing_mode must be either 'legacy' or 'optimized'."
+            raise InputError(msg, logger)
 
         # base_api_url is no longer supported - raise error if provided
         if "base_api_url" in kwargs:
@@ -522,17 +526,35 @@ class FabricWorkspace:
         file_path = file_obj.file_path
 
         if "key_value_replace" in self.environment_parameter:
-            for parameter_dict in self.environment_parameter.get("key_value_replace"):
-                # Extract the file filter values and set the match condition
-                input_type, input_name, input_path = extract_parameter_filters(self, parameter_dict)
-                filter_match = check_replacement(input_type, input_name, input_path, item_type, item_name, file_path)
+            if self.parameter_processing_mode == "optimized":
+                # Skip key/value filter evaluation entirely when content is not JSON/YAML,
+                # as replacements cannot apply to other formats.
+                is_json = check_valid_json_content(raw_file)
+                is_yaml = False if is_json else check_valid_yaml_content(raw_file)
+                if is_json or is_yaml:
+                    for parameter_dict in self.environment_parameter.get("key_value_replace"):
+                        input_type, input_name, input_path = extract_parameter_filters(self, parameter_dict)
+                        filter_match = check_replacement(input_type, input_name, input_path, item_type, item_name, file_path)
+                        if filter_match:
+                            raw_file = replace_key_value(
+                                self,
+                                parameter_dict,
+                                raw_file,
+                                self.environment,
+                                is_yaml=bool(is_yaml),
+                            )
+            else:
+                for parameter_dict in self.environment_parameter.get("key_value_replace"):
+                    # Extract the file filter values and set the match condition
+                    input_type, input_name, input_path = extract_parameter_filters(self, parameter_dict)
+                    filter_match = check_replacement(input_type, input_name, input_path, item_type, item_name, file_path)
 
-                # Perform replacement if condition is met and file contains valid JSON or YAML
-                if filter_match:
-                    if check_valid_json_content(raw_file):
-                        raw_file = replace_key_value(self, parameter_dict, raw_file, self.environment)
-                    elif check_valid_yaml_content(raw_file):
-                        raw_file = replace_key_value(self, parameter_dict, raw_file, self.environment, is_yaml=True)
+                    # Perform replacement if condition is met and file contains valid JSON or YAML
+                    if filter_match:
+                        if check_valid_json_content(raw_file):
+                            raw_file = replace_key_value(self, parameter_dict, raw_file, self.environment)
+                        elif check_valid_yaml_content(raw_file):
+                            raw_file = replace_key_value(self, parameter_dict, raw_file, self.environment, is_yaml=True)
 
         if "find_replace" in self.environment_parameter:
             for parameter_dict in self.environment_parameter.get("find_replace"):

@@ -4,6 +4,7 @@
 import json
 import re
 import tempfile
+import time
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -2024,6 +2025,61 @@ def test_publish_non_variable_library_calls_all_replacements(
         mock_logical.assert_called_once()
         mock_params.assert_called_once()
         mock_ws.assert_called_once()
+
+
+def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
+    temp_workspace_dir, patched_fabric_workspace, valid_workspace_id
+):
+    """Test legacy vs optimized parameter processing behavior and timing for non-JSON/YAML files."""
+    from fabric_cicd._common._file import File
+    from fabric_cicd._common._item import Item
+
+    item_dir = temp_workspace_dir / "BigReport.Report"
+    item_dir.mkdir(parents=True)
+    script_path = item_dir / "large-script.py"
+    script_path.write_text("print('hello world')", encoding="utf-8")
+
+    legacy_workspace = patched_fabric_workspace(
+        workspace_id=valid_workspace_id,
+        repository_directory=str(temp_workspace_dir),
+        item_type_in_scope=["Report"],
+    )
+    optimized_workspace = patched_fabric_workspace(
+        workspace_id=valid_workspace_id,
+        repository_directory=str(temp_workspace_dir),
+        item_type_in_scope=["Report"],
+        parameter_processing_mode="optimized",
+    )
+
+    parameter_rules = [
+        {"item_type": "Report", "item_name": ["BigReport"], "path": ".*", "find_value": "x", "replace_value": {"N/A": "y"}}
+        for _ in range(200)
+    ]
+    legacy_workspace.environment_parameter = {"key_value_replace": parameter_rules}
+    optimized_workspace.environment_parameter = {"key_value_replace": parameter_rules}
+
+    test_item = Item(type="Report", name="BigReport", description="", guid="", path=item_dir)
+    test_file = File(item_path=item_dir, file_path=script_path)
+
+    def _slow_check_replacement(*_args, **_kwargs):
+        time.sleep(0.001)
+        return True
+
+    with patch("fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement) as legacy_check:
+        legacy_start = time.perf_counter()
+        legacy_workspace._replace_parameters(test_file, test_item)
+        legacy_duration = time.perf_counter() - legacy_start
+        legacy_calls = legacy_check.call_count
+
+    with patch("fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement) as optimized_check:
+        optimized_start = time.perf_counter()
+        optimized_workspace._replace_parameters(test_file, test_item)
+        optimized_duration = time.perf_counter() - optimized_start
+        optimized_calls = optimized_check.call_count
+
+    assert legacy_calls == 200
+    assert optimized_calls == 0
+    assert optimized_duration < legacy_duration
 
 
 def test_api_root_url_snapshot_is_not_retargeted_by_second_configure_call(
