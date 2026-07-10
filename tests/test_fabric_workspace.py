@@ -2027,17 +2027,42 @@ def test_publish_non_variable_library_calls_all_replacements(
         mock_ws.assert_called_once()
 
 
+@pytest.mark.parametrize(
+    ("num_rules", "num_files"),
+    [
+        (1, 10),
+        (1, 100),
+        (1, 1000),
+        (2, 10),
+        (2, 100),
+        (2, 1000),
+        (3, 10),
+        (3, 100),
+        (3, 1000),
+    ],
+)
 def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
-    temp_workspace_dir, patched_fabric_workspace, valid_workspace_id
+    temp_workspace_dir, patched_fabric_workspace, valid_workspace_id, num_rules, num_files
 ):
-    """Test legacy vs optimized parameter processing behavior and timing for non-JSON/YAML files."""
+    """Test legacy vs optimized parameter processing behavior and timing for non-JSON/YAML files.
+
+    Parametrized over combinations of replacement-rule counts (1, 2, 3) and file counts
+    (10, 100, 1000).  In legacy mode every rule is evaluated for every file, so
+    check_replacement is called num_rules * num_files times.  In optimized mode the
+    check is skipped entirely for non-JSON/YAML files, so the call count is 0.
+    """
     from fabric_cicd._common._file import File
     from fabric_cicd._common._item import Item
 
     item_dir = temp_workspace_dir / "BigReport.Report"
     item_dir.mkdir(parents=True)
-    script_path = item_dir / "large-script.py"
-    script_path.write_text("print('hello world')", encoding="utf-8")
+
+    # Create num_files plain Python scripts (non-JSON/YAML) inside the item directory.
+    script_paths = []
+    for i in range(num_files):
+        script_path = item_dir / f"script-{i}.py"
+        script_path.write_text("print('hello world')", encoding="utf-8")
+        script_paths.append(script_path)
 
     legacy_workspace = patched_fabric_workspace(
         workspace_id=valid_workspace_id,
@@ -2059,13 +2084,13 @@ def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
             "find_value": "x",
             "replace_value": {"N/A": "y"},
         }
-        for _ in range(200)
+        for _ in range(num_rules)
     ]
     legacy_workspace.environment_parameter = {"key_value_replace": parameter_rules}
     optimized_workspace.environment_parameter = {"key_value_replace": parameter_rules}
 
     test_item = Item(type="Report", name="BigReport", description="", guid="", path=item_dir)
-    test_file = File(item_path=item_dir, file_path=script_path)
+    test_files = [File(item_path=item_dir, file_path=p) for p in script_paths]
 
     def _slow_check_replacement(*_args, **_kwargs):
         time.sleep(0.001)
@@ -2073,7 +2098,8 @@ def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
 
     with patch("fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement) as legacy_check:
         legacy_start = time.perf_counter()
-        legacy_workspace._replace_parameters(test_file, test_item)
+        for f in test_files:
+            legacy_workspace._replace_parameters(f, test_item)
         legacy_duration = time.perf_counter() - legacy_start
         legacy_calls = legacy_check.call_count
 
@@ -2081,11 +2107,12 @@ def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
         "fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement
     ) as optimized_check:
         optimized_start = time.perf_counter()
-        optimized_workspace._replace_parameters(test_file, test_item)
+        for f in test_files:
+            optimized_workspace._replace_parameters(f, test_item)
         optimized_duration = time.perf_counter() - optimized_start
         optimized_calls = optimized_check.call_count
 
-    assert legacy_calls == 200
+    assert legacy_calls == num_rules * num_files
     assert optimized_calls == 0
     assert optimized_duration < legacy_duration
 
