@@ -2052,7 +2052,13 @@ def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
     )
 
     parameter_rules = [
-        {"item_type": "Report", "item_name": ["BigReport"], "path": ".*", "find_value": "x", "replace_value": {"N/A": "y"}}
+        {
+            "item_type": "Report",
+            "item_name": ["BigReport"],
+            "path": ".*",
+            "find_value": "x",
+            "replace_value": {"N/A": "y"},
+        }
         for _ in range(200)
     ]
     legacy_workspace.environment_parameter = {"key_value_replace": parameter_rules}
@@ -2071,7 +2077,9 @@ def test_parameter_processing_mode_optimized_is_faster_for_non_structured_files(
         legacy_duration = time.perf_counter() - legacy_start
         legacy_calls = legacy_check.call_count
 
-    with patch("fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement) as optimized_check:
+    with patch(
+        "fabric_cicd._parameter._utils.check_replacement", side_effect=_slow_check_replacement
+    ) as optimized_check:
         optimized_start = time.perf_counter()
         optimized_workspace._replace_parameters(test_file, test_item)
         optimized_duration = time.perf_counter() - optimized_start
